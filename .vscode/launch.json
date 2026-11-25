@@ -1,0 +1,31 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Launch demo1",
+			"type": "cppdbg",
+			"request": "launch",
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}/apps/demo1",
+			"environment": [
+				{
+					"name": "LD_LIBRARY_PATH",
+					"value": "${env:HOME}/bake3/x64-Linux/debug/lib/:/usr/local/lib/"
+				},
+			],
+			"program": "${workspaceFolder}/apps/demo1/.bake/x64-Linux-debug/demo1",
+			"args": [],
+			"osx": {
+				"MIMode": "lldb",
+				"targetArchitecture": "arm64",
+				"externalConsole": false,
+			},
+			"linux": {
+				"externalConsole": false,
+			}
+		},
+	]
+}
