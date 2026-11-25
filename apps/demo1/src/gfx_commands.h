@@ -7,6 +7,11 @@
 extern "C" {
 #endif
 
+/*
+ * Commands are authored and pushed from C. The current in-process byte stream
+ * is an implementation detail, not a stable binary or wire command format.
+ */
+
 typedef struct {
     gfx_cmd_header_t header;
     gfx_handle_t     window_id;

@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+/* Opcode values and record layout are internal to the C command prototype,
+ * not a stable binary protocol. */
 typedef enum {
     GFX_OP_NOP              = 0x00,
 
