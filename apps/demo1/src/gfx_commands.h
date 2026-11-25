@@ -10,6 +10,19 @@ extern "C" {
 /*
  * Commands are authored and pushed from C. The current in-process byte stream
  * is an implementation detail, not a stable binary or wire command format.
+ *
+ * A record consists of its fixed command struct followed by its payload,
+ * padded to four bytes. header.byte_size includes the header and padding.
+ * WINDOW_CREATE carries title_len bytes; BUFFER_UPLOAD, TEXTURE_UPLOAD,
+ * SHADER_CREATE and BIND_UNIFORM carry data_size, data_size, code_size and
+ * data_size bytes respectively. PIPELINE_CREATE carries attr_count
+ * gfx_vertex_attr_t values. All other commands have no payload.
+ *
+ * Each stream must contain complete frames and passes. Passes are nested in
+ * frames, rendering state and draw commands are confined to passes, and
+ * resource and window commands may only appear outside passes. Frame end
+ * must refer to the same window as frame begin. Streams can contain setup
+ * commands and multiple complete frames.
  */
 
 typedef struct {
@@ -192,6 +205,36 @@ typedef struct {
     int32_t          vertex_offset;
 } cmd_draw_indexed_t;
 
+typedef enum {
+    GFX_VALIDATION_OK = 0,
+    GFX_VALIDATION_NULL_STREAM,
+    GFX_VALIDATION_TRUNCATED_HEADER,
+    GFX_VALIDATION_INVALID_RECORD_SIZE,
+    GFX_VALIDATION_TRUNCATED_RECORD,
+    GFX_VALIDATION_UNKNOWN_OPCODE,
+    GFX_VALIDATION_INVALID_PAYLOAD_SIZE,
+    GFX_VALIDATION_INVALID_ORDER,
+    GFX_VALIDATION_FRAME_WINDOW_MISMATCH,
+    GFX_VALIDATION_INCOMPLETE_FRAME,
+    GFX_VALIDATION_INCOMPLETE_PASS
+} gfx_validation_code_t;
+
+typedef struct {
+    gfx_validation_code_t code;
+    uint32_t offset;
+    /* UINT16_MAX means no complete header was available. */
+    uint16_t opcode;
+} gfx_validation_result_t;
+
+/*
+ * Validates the complete stream without executing it. An empty stream is valid.
+ * On an incomplete frame or pass, offset points one byte past the stream and
+ * opcode is UINT16_MAX. Resource existence and backend constraints are not
+ * checked. A producer must separately report recording failures.
+ */
+gfx_validation_result_t gfx_validate_stream(const void *cmd_stream, uint32_t stream_bytes);
+
+/* A backend must validate the entire stream before executing any command. */
 int32_t gfx_execute_stream(void *backend_ctx, const void *cmd_stream, uint32_t stream_bytes);
 
 #ifdef __cplusplus

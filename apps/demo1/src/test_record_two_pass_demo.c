@@ -109,5 +109,11 @@ void record_two_pass_demo(void *backend_ctx)
 	push_cmd(&s, GFX_OP_FRAME_END, 0, &frame, sizeof(frame), NULL, 0);
 
 	/* Execute the entire recorded byte stream on the chosen backend */
+	gfx_validation_result_t result = gfx_validate_stream(s.buf, s.offset);
+	if (result.code != GFX_VALIDATION_OK) {
+		fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
+			result.code, result.offset, result.opcode);
+		return;
+	}
 	gfx_execute_stream(backend_ctx, s.buf, s.offset);
 }

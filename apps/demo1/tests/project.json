@@ -1,0 +1,12 @@
+{
+    "id": "demo1_validator_tests",
+    "type": "application",
+    "value": {
+        "language": "c",
+        "public": false
+    },
+    "lang.c": {
+        "c-standard": "gnu99",
+        "cflags": ["-Wall", "-Wextra", "-Werror"]
+    }
+}
