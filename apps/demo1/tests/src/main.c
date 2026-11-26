@@ -4,6 +4,7 @@
 
 /* Compile the production validator into this standalone test application. */
 #include "../../src/gfx_validate.c"
+#include "../../src/gfx_stream.c"
 #include "../../src/test_record_two_pass_demo.c"
 
 int32_t gfx_execute_stream(void *backend_ctx, const void *stream, uint32_t size)
@@ -76,6 +77,33 @@ static void test_boundaries(void)
     memcpy(bytes + 1, &header, sizeof(header));
     expect(bytes + 1, 8, GFX_VALIDATION_OK, 8, UINT16_MAX);
     expect(bytes + 1, 9, GFX_VALIDATION_TRUNCATED_HEADER, 8, UINT16_MAX);
+}
+
+static void test_stream_push(void)
+{
+    uint8_t bytes[32] = {0};
+    const char title[] = "abc";
+    cmd_window_create_t window = {.title_len = 3};
+    gfx_stream_t stream = {.buf = bytes, .capacity = sizeof(bytes)};
+    gfx_cmd_header_t header;
+
+    assert(gfx_stream_push(&stream, GFX_OP_WINDOW_CREATE, 7, &window,
+        sizeof(window), title, 3) == GFX_STREAM_OK);
+    assert(stream.offset == sizeof(window) + 4);
+    memcpy(&header, bytes, sizeof(header));
+    assert(header.opcode == GFX_OP_WINDOW_CREATE);
+    assert(header.flags == 7);
+    assert(header.byte_size == sizeof(window) + 4);
+    assert(memcmp(bytes + sizeof(window), title, 3) == 0);
+    assert(bytes[sizeof(window) + 3] == 0);
+
+    stream.capacity = stream.offset;
+    assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &header,
+        sizeof(header), NULL, 0) == GFX_STREAM_CAPACITY_EXCEEDED);
+    assert(stream.offset == sizeof(window) + 4);
+    assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &header,
+        sizeof(header), NULL, 0) == GFX_STREAM_CAPACITY_EXCEEDED);
+    assert(stream.error == GFX_STREAM_CAPACITY_EXCEEDED);
 }
 
 static void test_fixed_commands(void)
@@ -226,6 +254,7 @@ int main(void)
 {
     unsigned executions = 0;
     test_boundaries();
+    test_stream_push();
     test_fixed_commands();
     test_payloads();
     test_order();

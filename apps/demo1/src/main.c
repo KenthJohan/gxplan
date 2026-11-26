@@ -1,40 +1,12 @@
 #include <stdio.h>
 #include <string.h>
 #include "gfx_commands.h"
-
-typedef struct {
-	uint8_t *buf;
-	uint32_t offset;
-	uint32_t capacity;
-} gfx_stream_t;
-
-static void push_cmd(gfx_stream_t *s, uint16_t op, uint16_t flags,
-const void *cmd, uint32_t cmd_size,
-const void *extra, uint32_t extra_size)
-{
-	uint32_t padded_extra = GFX_ALIGN4(extra_size);
-	uint32_t total        = cmd_size + padded_extra;
-	if (s->offset + total > s->capacity)
-		return;
-
-	gfx_cmd_header_t hdr = {op, flags, total};
-	memcpy(s->buf + s->offset, cmd, cmd_size);
-	memcpy(s->buf + s->offset, &hdr, sizeof(hdr)); /* Write filled header */
-	s->offset += cmd_size;
-
-	if (extra && extra_size > 0) {
-		memcpy(s->buf + s->offset, extra, extra_size);
-		if (padded_extra > extra_size) {
-			memset(s->buf + s->offset + extra_size, 0, padded_extra - extra_size);
-		}
-		s->offset += padded_extra;
-	}
-}
+#include "gfx_stream.h"
 
 void run_dynamic_loop(void *backend_ctx)
 {
 	static uint8_t stream_mem[65536];
-	gfx_stream_t   s = {stream_mem, 0, sizeof(stream_mem)};
+	gfx_stream_t   s = {.buf = stream_mem, .capacity = sizeof(stream_mem)};
 
 	const gfx_handle_t WIN_ID        = 1;
 	const gfx_handle_t SWAPCHAIN_TEX = 2;
@@ -47,17 +19,21 @@ void run_dynamic_loop(void *backend_ctx)
 	 * ===================================================================== */
 	cmd_window_create_t win = {
 	.window_id = WIN_ID, .swapchain_tex_id = SWAPCHAIN_TEX, .width = 800, .height = 600, .present_mode = GFX_PRESENT_VSYNC};
-	push_cmd(&s, GFX_OP_WINDOW_CREATE, 0, &win, sizeof(win), NULL, 0);
+	gfx_stream_push(&s, GFX_OP_WINDOW_CREATE, 0, &win, sizeof(win), NULL, 0);
 
 	/* Pre-allocate a dynamic buffer large enough for worst-case vertex count */
 	cmd_buffer_create_t bc = {
 	.buffer_id   = DYN_VBUF,
 	.size_bytes  = MAX_VERTS * sizeof(float) * 2,
 	.usage_flags = GFX_BUFFER_VERTEX | GFX_BUFFER_DYNAMIC};
-	push_cmd(&s, GFX_OP_BUFFER_CREATE, 0, &bc, sizeof(bc), NULL, 0);
+	gfx_stream_push(&s, GFX_OP_BUFFER_CREATE, 0, &bc, sizeof(bc), NULL, 0);
 
 	/* (Assume shaders & PIPE_ID are created here too) */
 
+	if (s.error != GFX_STREAM_OK) {
+		fprintf(stderr, "Unable to record startup stream: error %d\n", s.error);
+		return;
+	}
 	gfx_validation_result_t result = gfx_validate_stream(s.buf, s.offset);
 	if (result.code != GFX_VALIDATION_OK) {
 		fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
@@ -85,9 +61,10 @@ void run_dynamic_loop(void *backend_ctx)
 
 		/* B. Reset stream cursor to 0 for the new frame */
 		s.offset = 0;
+		s.error = GFX_STREAM_OK;
 
 		cmd_frame_t frame = {.window_id = WIN_ID};
-		push_cmd(&s, GFX_OP_FRAME_BEGIN, 0, &frame, sizeof(frame), NULL, 0);
+		gfx_stream_push(&s, GFX_OP_FRAME_BEGIN, 0, &frame, sizeof(frame), NULL, 0);
 
 		/* C. Upload dynamic vertices BEFORE starting the render pass */
 		if (vert_count > 0) {
@@ -96,7 +73,7 @@ void run_dynamic_loop(void *backend_ctx)
 			.buffer_id  = DYN_VBUF,
 			.dst_offset = 0,
 			.data_size  = upload_bytes};
-			push_cmd(&s, GFX_OP_BUFFER_UPLOAD, 0, &bu, sizeof(bu), verts, upload_bytes);
+			gfx_stream_push(&s, GFX_OP_BUFFER_UPLOAD, 0, &bu, sizeof(bu), verts, upload_bytes);
 		}
 
 		/* D. Begin Render Pass & Draw `vert_count` vertices */
@@ -104,22 +81,26 @@ void run_dynamic_loop(void *backend_ctx)
 		.color_tex_id = SWAPCHAIN_TEX,
 		.clear_flags  = GFX_CLEAR_COLOR,
 		.clear_rgba   = {0.08f, 0.08f, 0.10f, 1.0f}};
-		push_cmd(&s, GFX_OP_PASS_BEGIN, 0, &pass, sizeof(pass), NULL, 0);
+		gfx_stream_push(&s, GFX_OP_PASS_BEGIN, 0, &pass, sizeof(pass), NULL, 0);
 
 		if (vert_count > 0) {
 			cmd_bind_pipeline_t bp = {.pipeline_id = PIPE_ID};
 			cmd_bind_vbuffer_t  bv = {.slot = 0, .buffer_id = DYN_VBUF, .offset_bytes = 0};
 			cmd_draw_t          dr = {.vertex_count = vert_count, .first_vertex = 0};
 
-			push_cmd(&s, GFX_OP_BIND_PIPELINE, 0, &bp, sizeof(bp), NULL, 0);
-			push_cmd(&s, GFX_OP_BIND_VBUFFER, 0, &bv, sizeof(bv), NULL, 0);
-			push_cmd(&s, GFX_OP_DRAW, 0, &dr, sizeof(dr), NULL, 0);
+			gfx_stream_push(&s, GFX_OP_BIND_PIPELINE, 0, &bp, sizeof(bp), NULL, 0);
+			gfx_stream_push(&s, GFX_OP_BIND_VBUFFER, 0, &bv, sizeof(bv), NULL, 0);
+			gfx_stream_push(&s, GFX_OP_DRAW, 0, &dr, sizeof(dr), NULL, 0);
 		}
 
-		push_cmd(&s, GFX_OP_PASS_END, 0, &(gfx_cmd_header_t){0}, sizeof(gfx_cmd_header_t), NULL, 0);
-		push_cmd(&s, GFX_OP_FRAME_END, 0, &frame, sizeof(frame), NULL, 0);
+		gfx_stream_push(&s, GFX_OP_PASS_END, 0, &(gfx_cmd_header_t){0}, sizeof(gfx_cmd_header_t), NULL, 0);
+		gfx_stream_push(&s, GFX_OP_FRAME_END, 0, &frame, sizeof(frame), NULL, 0);
 
 		/* E. Execute the frame's command stream */
+		if (s.error != GFX_STREAM_OK) {
+			fprintf(stderr, "Unable to record frame stream: error %d\n", s.error);
+			return;
+		}
 		result = gfx_validate_stream(s.buf, s.offset);
 		if (result.code != GFX_VALIDATION_OK) {
 			fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
