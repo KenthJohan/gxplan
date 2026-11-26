@@ -6,7 +6,7 @@
 void record_two_pass_demo(void *backend_ctx)
 {
 	uint8_t      memory[16384];
-	gfx_stream_t s = {.buf = memory, .capacity = sizeof(memory)};
+	gfx_stream_t s = {.bytes = {.buf = memory, .capacity = sizeof(memory)}};
 
 	/* Handle IDs chosen by the host */
 	const gfx_handle_t WIN_ID        = 1;
@@ -85,11 +85,11 @@ void record_two_pass_demo(void *backend_ctx)
 		fprintf(stderr, "Unable to record command stream: error %d\n", s.error);
 		return;
 	}
-	gfx_validation_result_t result = gfx_validate_stream(s.buf, s.offset);
+	gfx_validation_result_t result = gfx_validate_stream(s.bytes.buf, s.bytes.offset);
 	if (result.code != GFX_VALIDATION_OK) {
 		fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
 			result.code, result.offset, result.opcode);
 		return;
 	}
-	gfx_execute_stream(backend_ctx, s.buf, s.offset);
+	gfx_execute_stream(backend_ctx, s.bytes.buf, s.bytes.offset);
 }

@@ -6,7 +6,7 @@
 void run_dynamic_loop(void *backend_ctx)
 {
 	static uint8_t stream_mem[65536];
-	gfx_stream_t   s = {.buf = stream_mem, .capacity = sizeof(stream_mem)};
+	gfx_stream_t   s = {.bytes = {.buf = stream_mem, .capacity = sizeof(stream_mem)}};
 
 	const gfx_handle_t WIN_ID        = 1;
 	const gfx_handle_t SWAPCHAIN_TEX = 2;
@@ -34,13 +34,13 @@ void run_dynamic_loop(void *backend_ctx)
 		fprintf(stderr, "Unable to record startup stream: error %d\n", s.error);
 		return;
 	}
-	gfx_validation_result_t result = gfx_validate_stream(s.buf, s.offset);
+	gfx_validation_result_t result = gfx_validate_stream(s.bytes.buf, s.bytes.offset);
 	if (result.code != GFX_VALIDATION_OK) {
 		fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
 			result.code, result.offset, result.opcode);
 		return;
 	}
-	gfx_execute_stream(backend_ctx, s.buf, s.offset);
+	gfx_execute_stream(backend_ctx, s.bytes.buf, s.bytes.offset);
 
 	/* =====================================================================
 	 * 2. MAIN LOOP (Executed every frame)
@@ -60,8 +60,7 @@ void run_dynamic_loop(void *backend_ctx)
 		}
 
 		/* B. Reset stream cursor to 0 for the new frame */
-		s.offset = 0;
-		s.error = GFX_STREAM_OK;
+		gfx_stream_reset(&s);
 
 		cmd_frame_t frame = {.window_id = WIN_ID};
 		gfx_stream_push(&s, GFX_OP_FRAME_BEGIN, 0, &frame, sizeof(frame), NULL, 0);
@@ -101,13 +100,13 @@ void run_dynamic_loop(void *backend_ctx)
 			fprintf(stderr, "Unable to record frame stream: error %d\n", s.error);
 			return;
 		}
-		result = gfx_validate_stream(s.buf, s.offset);
+		result = gfx_validate_stream(s.bytes.buf, s.bytes.offset);
 		if (result.code != GFX_VALIDATION_OK) {
 			fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
 				result.code, result.offset, result.opcode);
 			return;
 		}
-		gfx_execute_stream(backend_ctx, s.buf, s.offset);
+		gfx_execute_stream(backend_ctx, s.bytes.buf, s.bytes.offset);
 	}
 }
 

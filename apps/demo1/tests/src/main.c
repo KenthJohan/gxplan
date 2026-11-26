@@ -84,12 +84,12 @@ static void test_stream_push(void)
     uint8_t bytes[32] = {0};
     const char title[] = "abc";
     cmd_window_create_t window = {.title_len = 3};
-    gfx_stream_t stream = {.buf = bytes, .capacity = sizeof(bytes)};
+    gfx_stream_t stream = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
     gfx_cmd_header_t header;
 
     assert(gfx_stream_push(&stream, GFX_OP_WINDOW_CREATE, 7, &window,
         sizeof(window), title, 3) == GFX_STREAM_OK);
-    assert(stream.offset == sizeof(window) + 4);
+    assert(stream.bytes.offset == sizeof(window) + 4);
     memcpy(&header, bytes, sizeof(header));
     assert(header.opcode == GFX_OP_WINDOW_CREATE);
     assert(header.flags == 7);
@@ -97,13 +97,196 @@ static void test_stream_push(void)
     assert(memcmp(bytes + sizeof(window), title, 3) == 0);
     assert(bytes[sizeof(window) + 3] == 0);
 
-    stream.capacity = stream.offset;
+    stream.bytes.capacity = stream.bytes.offset;
     assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &header,
         sizeof(header), NULL, 0) == GFX_STREAM_CAPACITY_EXCEEDED);
-    assert(stream.offset == sizeof(window) + 4);
+    assert(stream.bytes.offset == sizeof(window) + 4);
     assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &header,
         sizeof(header), NULL, 0) == GFX_STREAM_CAPACITY_EXCEEDED);
     assert(stream.error == GFX_STREAM_CAPACITY_EXCEEDED);
+}
+
+static void test_push_transitions(void)
+{
+    const struct { uint16_t opcode; uint32_t size; unsigned allowed; } cases[] = {
+        {GFX_OP_NOP, sizeof(gfx_cmd_header_t), 7},
+        {GFX_OP_WINDOW_CREATE, sizeof(cmd_window_create_t), 3},
+        {GFX_OP_WINDOW_RESIZE, sizeof(cmd_window_resize_t), 3},
+        {GFX_OP_WINDOW_DESTROY, sizeof(cmd_window_destroy_t), 3},
+        {GFX_OP_FRAME_BEGIN, sizeof(cmd_frame_t), 1},
+        {GFX_OP_FRAME_END, sizeof(cmd_frame_t), 2},
+        {GFX_OP_BUFFER_CREATE, sizeof(cmd_buffer_create_t), 3},
+        {GFX_OP_BUFFER_UPLOAD, sizeof(cmd_buffer_upload_t), 3},
+        {GFX_OP_BUFFER_DESTROY, sizeof(cmd_buffer_destroy_t), 3},
+        {GFX_OP_TEXTURE_CREATE, sizeof(cmd_texture_create_t), 3},
+        {GFX_OP_TEXTURE_UPLOAD, sizeof(cmd_texture_upload_t), 3},
+        {GFX_OP_TEXTURE_DESTROY, sizeof(cmd_texture_destroy_t), 3},
+        {GFX_OP_SHADER_CREATE, sizeof(cmd_shader_create_t), 3},
+        {GFX_OP_SHADER_DESTROY, sizeof(cmd_shader_destroy_t), 3},
+        {GFX_OP_PIPELINE_CREATE, sizeof(cmd_pipeline_create_t), 3},
+        {GFX_OP_PIPELINE_DESTROY, sizeof(cmd_pipeline_destroy_t), 3},
+        {GFX_OP_PASS_BEGIN, sizeof(cmd_pass_begin_t), 2},
+        {GFX_OP_PASS_END, sizeof(gfx_cmd_header_t), 4},
+        {GFX_OP_SET_VIEWPORT, sizeof(cmd_set_viewport_t), 4},
+        {GFX_OP_SET_SCISSOR, sizeof(cmd_set_scissor_t), 4},
+        {GFX_OP_BIND_PIPELINE, sizeof(cmd_bind_pipeline_t), 4},
+        {GFX_OP_BIND_VBUFFER, sizeof(cmd_bind_vbuffer_t), 4},
+        {GFX_OP_BIND_IBUFFER, sizeof(cmd_bind_ibuffer_t), 4},
+        {GFX_OP_BIND_UNIFORM, sizeof(cmd_bind_uniform_t), 4},
+        {GFX_OP_BIND_TEXTURE, sizeof(cmd_bind_texture_t), 4},
+        {GFX_OP_DRAW, sizeof(cmd_draw_t), 4},
+        {GFX_OP_DRAW_INDEXED, sizeof(cmd_draw_indexed_t), 4}
+    };
+    uint8_t cmd[128] = {0};
+    cmd_frame_t frame = {0};
+    cmd_pass_begin_t pass = {0};
+    gfx_cmd_header_t end = {0};
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        for (gfx_stream_state_t initial = GFX_STREAM_OUTSIDE_FRAME;
+            initial <= GFX_STREAM_IN_PASS; initial++) {
+            uint8_t bytes[512] = {0};
+            uint8_t before[sizeof(bytes)];
+            gfx_stream_t stream = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
+            if (initial >= GFX_STREAM_IN_FRAME) {
+                assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0,
+                    &frame, sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+            }
+            if (initial == GFX_STREAM_IN_PASS) {
+                assert(gfx_stream_push(&stream, GFX_OP_PASS_BEGIN, 0,
+                    &pass, sizeof(pass), NULL, 0) == GFX_STREAM_OK);
+            }
+            uint32_t offset = stream.bytes.offset;
+            memcpy(before, bytes, sizeof(bytes));
+            gfx_stream_result_t result = gfx_stream_push(&stream, cases[i].opcode,
+                0, cmd, cases[i].size, NULL, 0);
+            if (!(cases[i].allowed & (1u << initial))) {
+                assert(result == GFX_STREAM_INVALID_ORDER);
+                assert(stream.bytes.offset == offset && stream.state == initial);
+                assert(memcmp(bytes, before, sizeof(bytes)) == 0);
+                assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &end,
+                    sizeof(end), NULL, 0) == result);
+                continue;
+            }
+            assert(result == GFX_STREAM_OK);
+            if (stream.state == GFX_STREAM_IN_PASS) {
+                assert(gfx_stream_push(&stream, GFX_OP_PASS_END, 0,
+                    &end, sizeof(end), NULL, 0) == GFX_STREAM_OK);
+            }
+            if (stream.state == GFX_STREAM_IN_FRAME) {
+                assert(gfx_stream_push(&stream, GFX_OP_FRAME_END, 0,
+                    &frame, sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+            }
+            expect(bytes, stream.bytes.offset, GFX_VALIDATION_OK,
+                stream.bytes.offset, UINT16_MAX);
+        }
+    }
+}
+
+static void test_push_failures_and_reset(void)
+{
+    uint8_t bytes[128] = {0};
+    uint8_t before[sizeof(bytes)];
+    gfx_stream_t stream = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
+    cmd_frame_t frame = {.window_id = 1};
+    cmd_frame_t other = {.window_id = 2};
+    cmd_window_create_t window = {.title_len = 3};
+    gfx_cmd_header_t header = {0};
+    const char title[] = "abc";
+
+    assert(gfx_stream_push(&stream, 0xffff, 0, &header, sizeof(header),
+        NULL, 0) == GFX_STREAM_UNKNOWN_OPCODE);
+    gfx_stream_reset(&stream);
+    assert(gfx_stream_push(&stream, GFX_OP_DRAW, 0, &header, sizeof(header),
+        NULL, 0) == GFX_STREAM_INVALID_COMMAND_SIZE);
+    gfx_stream_reset(&stream);
+    assert(gfx_stream_push(&stream, GFX_OP_WINDOW_CREATE, 0, &window,
+        sizeof(window), title, 2) == GFX_STREAM_INVALID_PAYLOAD_SIZE);
+    gfx_stream_reset(&stream);
+    assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0, &frame,
+        sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+    assert(stream.state == GFX_STREAM_IN_FRAME && stream.frame_window == 1);
+    uint32_t offset = stream.bytes.offset;
+    memcpy(before, bytes, sizeof(bytes));
+    assert(gfx_stream_push(&stream, GFX_OP_FRAME_END, 0, &other,
+        sizeof(other), NULL, 0) == GFX_STREAM_FRAME_WINDOW_MISMATCH);
+    assert(stream.state == GFX_STREAM_IN_FRAME && stream.frame_window == 1);
+    assert(stream.bytes.offset == offset && memcmp(bytes, before, sizeof(bytes)) == 0);
+
+    gfx_stream_reset(&stream);
+    assert(stream.bytes.buf == bytes && stream.bytes.capacity == sizeof(bytes));
+    assert(stream.bytes.offset == 0 && stream.state == GFX_STREAM_OUTSIDE_FRAME);
+    assert(stream.error == GFX_STREAM_OK && stream.frame_window == GFX_NULL_HANDLE);
+    stream.bytes.capacity = sizeof(frame) - 1;
+    memcpy(before, bytes, sizeof(bytes));
+    assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0, &frame,
+        sizeof(frame), NULL, 0) == GFX_STREAM_CAPACITY_EXCEEDED);
+    assert(stream.bytes.offset == 0 && stream.state == GFX_STREAM_OUTSIDE_FRAME);
+    assert(stream.frame_window == GFX_NULL_HANDLE && memcmp(bytes, before, sizeof(bytes)) == 0);
+
+    gfx_stream_reset(&stream);
+    stream.bytes.capacity = sizeof(bytes);
+    assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0, &frame,
+        sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+    expect(bytes, stream.bytes.offset, GFX_VALIDATION_INCOMPLETE_FRAME,
+        stream.bytes.offset, UINT16_MAX);
+    gfx_stream_reset(&stream);
+    assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &header, sizeof(header),
+        title, UINT32_MAX) == GFX_STREAM_SIZE_OVERFLOW);
+}
+
+static void test_push_payload_sizes(void)
+{
+    cmd_window_create_t window = {.title_len = 3};
+    cmd_buffer_upload_t buffer = {.data_size = 3};
+    cmd_texture_upload_t texture = {.data_size = 3};
+    cmd_shader_create_t shader = {.code_size = 3};
+    cmd_pipeline_create_t pipeline = {.attr_count = 1};
+    cmd_bind_uniform_t uniform = {.data_size = 3};
+    const struct { uint16_t opcode; const void *cmd; uint32_t size, payload; } cases[] = {
+        {GFX_OP_WINDOW_CREATE, &window, sizeof(window), 3},
+        {GFX_OP_BUFFER_UPLOAD, &buffer, sizeof(buffer), 3},
+        {GFX_OP_TEXTURE_UPLOAD, &texture, sizeof(texture), 3},
+        {GFX_OP_SHADER_CREATE, &shader, sizeof(shader), 3},
+        {GFX_OP_PIPELINE_CREATE, &pipeline, sizeof(pipeline), sizeof(gfx_vertex_attr_t)},
+        {GFX_OP_BIND_UNIFORM, &uniform, sizeof(uniform), 3}
+    };
+    uint8_t payload[8] = {1, 2, 3, 4};
+    cmd_frame_t frame = {.window_id = 1};
+    cmd_pass_begin_t pass = {0};
+    gfx_cmd_header_t end = {0};
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        for (int valid = 0; valid < 2; valid++) {
+            uint8_t bytes[256] = {0};
+            gfx_stream_t stream = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
+            if (cases[i].opcode == GFX_OP_BIND_UNIFORM) {
+                assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0,
+                    &frame, sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+                assert(gfx_stream_push(&stream, GFX_OP_PASS_BEGIN, 0,
+                    &pass, sizeof(pass), NULL, 0) == GFX_STREAM_OK);
+            }
+            uint32_t offset = stream.bytes.offset;
+            gfx_stream_state_t state = stream.state;
+            gfx_stream_result_t result = gfx_stream_push(&stream, cases[i].opcode, 0,
+                cases[i].cmd, cases[i].size, payload, cases[i].payload - !valid);
+            if (!valid) {
+                assert(result == GFX_STREAM_INVALID_PAYLOAD_SIZE);
+                assert(stream.bytes.offset == offset && stream.state == state);
+                continue;
+            }
+            assert(result == GFX_STREAM_OK);
+            assert(memcmp(bytes + offset + cases[i].size, payload, cases[i].payload) == 0);
+            if (stream.state == GFX_STREAM_IN_PASS) {
+                assert(gfx_stream_push(&stream, GFX_OP_PASS_END, 0,
+                    &end, sizeof(end), NULL, 0) == GFX_STREAM_OK);
+                assert(gfx_stream_push(&stream, GFX_OP_FRAME_END, 0,
+                    &frame, sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+            }
+            expect(bytes, stream.bytes.offset, GFX_VALIDATION_OK,
+                stream.bytes.offset, UINT16_MAX);
+        }
+    }
 }
 
 static void test_fixed_commands(void)
@@ -255,6 +438,9 @@ int main(void)
     unsigned executions = 0;
     test_boundaries();
     test_stream_push();
+    test_push_transitions();
+    test_push_failures_and_reset();
+    test_push_payload_sizes();
     test_fixed_commands();
     test_payloads();
     test_order();
