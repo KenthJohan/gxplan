@@ -11,7 +11,7 @@
 int32_t gfx_execute_stream(void *backend_ctx, const void *stream, uint32_t size)
 {
     unsigned *executions = backend_ctx;
-    assert(gfx_validate_stream(stream, size).code == GFX_VALIDATION_OK);
+    assert(gfx_validate_stream(stream, size).code == GFX_OK);
     (*executions)++;
     return 0;
 }
@@ -33,7 +33,7 @@ static void append(test_stream_t *stream, uint16_t opcode, const void *cmd,
     stream->size += header.byte_size;
 }
 
-static void expect(const void *stream, uint32_t size, gfx_validation_code_t code,
+static void expect(const void *stream, uint32_t size, gfx_result_t code,
     uint32_t offset, uint16_t opcode)
 {
     gfx_validation_result_t result = gfx_validate_stream(stream, size);
@@ -49,35 +49,35 @@ static void test_boundaries(void)
     uint8_t bytes[64] = {0};
     gfx_cmd_header_t header = {GFX_OP_NOP, 0, sizeof(header)};
 
-    expect(NULL, 0, GFX_VALIDATION_OK, 0, UINT16_MAX);
-    expect(NULL, 1, GFX_VALIDATION_NULL_STREAM, 0, UINT16_MAX);
-    expect(bytes, 7, GFX_VALIDATION_TRUNCATED_HEADER, 0, UINT16_MAX);
+    expect(NULL, 0, GFX_OK, 0, UINT16_MAX);
+    expect(NULL, 1, GFX_ERROR_NULL_STREAM, 0, UINT16_MAX);
+    expect(bytes, 7, GFX_ERROR_TRUNCATED_HEADER, 0, UINT16_MAX);
 
     header.byte_size = 0;
     memcpy(bytes, &header, sizeof(header));
-    expect(bytes, 8, GFX_VALIDATION_INVALID_RECORD_SIZE, 0, GFX_OP_NOP);
+    expect(bytes, 8, GFX_ERROR_INVALID_RECORD_SIZE, 0, GFX_OP_NOP);
     header.byte_size = 9;
     memcpy(bytes, &header, sizeof(header));
-    expect(bytes, 12, GFX_VALIDATION_INVALID_RECORD_SIZE, 0, GFX_OP_NOP);
+    expect(bytes, 12, GFX_ERROR_INVALID_RECORD_SIZE, 0, GFX_OP_NOP);
     header.byte_size = UINT32_MAX - 3u;
     memcpy(bytes, &header, sizeof(header));
-    expect(bytes, 8, GFX_VALIDATION_TRUNCATED_RECORD, 0, GFX_OP_NOP);
+    expect(bytes, 8, GFX_ERROR_TRUNCATED_RECORD, 0, GFX_OP_NOP);
     header.opcode = 0xfffe;
     header.byte_size = 8;
     memcpy(bytes, &header, sizeof(header));
-    expect(bytes, 8, GFX_VALIDATION_UNKNOWN_OPCODE, 0, 0xfffe);
+    expect(bytes, 8, GFX_ERROR_UNKNOWN_OPCODE, 0, 0xfffe);
     header.opcode = GFX_OP_DRAW;
     memcpy(bytes, &header, sizeof(header));
-    expect(bytes, 8, GFX_VALIDATION_INVALID_RECORD_SIZE, 0, GFX_OP_DRAW);
+    expect(bytes, 8, GFX_ERROR_INVALID_RECORD_SIZE, 0, GFX_OP_DRAW);
     header.opcode = GFX_OP_NOP;
     header.byte_size = 12;
     memcpy(bytes, &header, sizeof(header));
-    expect(bytes, 12, GFX_VALIDATION_INVALID_PAYLOAD_SIZE, 0, GFX_OP_NOP);
+    expect(bytes, 12, GFX_ERROR_INVALID_PAYLOAD_SIZE, 0, GFX_OP_NOP);
 
     header.byte_size = 8;
     memcpy(bytes + 1, &header, sizeof(header));
-    expect(bytes + 1, 8, GFX_VALIDATION_OK, 8, UINT16_MAX);
-    expect(bytes + 1, 9, GFX_VALIDATION_TRUNCATED_HEADER, 8, UINT16_MAX);
+    expect(bytes + 1, 8, GFX_OK, 8, UINT16_MAX);
+    expect(bytes + 1, 9, GFX_ERROR_TRUNCATED_HEADER, 8, UINT16_MAX);
 }
 
 static void test_bytebuf_append(void)
@@ -91,37 +91,37 @@ static void test_bytebuf_append(void)
     gfx_bytebuf_span_t spans[] = {{a, sizeof(a)}, {NULL, 0}, {b, sizeof(b)}};
     gfx_bytebuf_span_t overflow[] = {{a, UINT32_MAX}, {b, 1}};
 
-    assert(gfx_bytebuf_append(NULL, a, sizeof(a)) == GFX_BYTEBUF_INVALID_ARGUMENT);
-    assert(gfx_bytebuf_appendv(&empty, NULL, 0) == GFX_BYTEBUF_OK);
-    assert(gfx_bytebuf_append(&empty, NULL, 0) == GFX_BYTEBUF_OK);
-    assert(gfx_bytebuf_append(&empty, a, 1) == GFX_BYTEBUF_CAPACITY_EXCEEDED);
+    assert(gfx_bytebuf_append(NULL, a, sizeof(a)) == GFX_ERROR_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_appendv(&empty, NULL, 0) == GFX_OK);
+    assert(gfx_bytebuf_append(&empty, NULL, 0) == GFX_OK);
+    assert(gfx_bytebuf_append(&empty, a, 1) == GFX_ERROR_CAPACITY_EXCEEDED);
     empty.capacity = 1;
-    assert(gfx_bytebuf_append(&empty, a, 1) == GFX_BYTEBUF_INVALID_ARGUMENT);
-    assert(gfx_bytebuf_append(&buffer, NULL, 0) == GFX_BYTEBUF_OK);
-    assert(gfx_bytebuf_append(&buffer, a, sizeof(a)) == GFX_BYTEBUF_OK);
+    assert(gfx_bytebuf_append(&empty, a, 1) == GFX_ERROR_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_append(&buffer, NULL, 0) == GFX_OK);
+    assert(gfx_bytebuf_append(&buffer, a, sizeof(a)) == GFX_OK);
     assert(buffer.offset == sizeof(a) && memcmp(bytes, a, sizeof(a)) == 0);
-    assert(gfx_bytebuf_appendv(&buffer, spans, 3) == GFX_BYTEBUF_OK);
+    assert(gfx_bytebuf_appendv(&buffer, spans, 3) == GFX_OK);
     assert(buffer.offset == sizeof(bytes));
     assert(memcmp(bytes + 3, a, sizeof(a)) == 0);
     assert(memcmp(bytes + 6, b, sizeof(b)) == 0);
 
     memcpy(before, bytes, sizeof(bytes));
-    assert(gfx_bytebuf_append(&buffer, b, sizeof(b)) == GFX_BYTEBUF_CAPACITY_EXCEEDED);
-    assert(gfx_bytebuf_append(&buffer, NULL, 1) == GFX_BYTEBUF_INVALID_ARGUMENT);
-    assert(gfx_bytebuf_appendv(&buffer, NULL, 1) == GFX_BYTEBUF_INVALID_ARGUMENT);
-    assert(gfx_bytebuf_appendv(&buffer, overflow, 2) == GFX_BYTEBUF_SIZE_OVERFLOW);
+    assert(gfx_bytebuf_append(&buffer, b, sizeof(b)) == GFX_ERROR_CAPACITY_EXCEEDED);
+    assert(gfx_bytebuf_append(&buffer, NULL, 1) == GFX_ERROR_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_appendv(&buffer, NULL, 1) == GFX_ERROR_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_appendv(&buffer, overflow, 2) == GFX_ERROR_SIZE_OVERFLOW);
     assert(buffer.offset == sizeof(bytes) && memcmp(bytes, before, sizeof(bytes)) == 0);
 
     buffer.offset = 0;
     spans[1].size = 1;
-    assert(gfx_bytebuf_appendv(&buffer, spans, 3) == GFX_BYTEBUF_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_appendv(&buffer, spans, 3) == GFX_ERROR_INVALID_ARGUMENT);
     assert(buffer.offset == 0 && memcmp(bytes, before, sizeof(bytes)) == 0);
     spans[1].size = 0;
     buffer.capacity = 4;
-    assert(gfx_bytebuf_appendv(&buffer, spans, 3) == GFX_BYTEBUF_CAPACITY_EXCEEDED);
+    assert(gfx_bytebuf_appendv(&buffer, spans, 3) == GFX_ERROR_CAPACITY_EXCEEDED);
     assert(buffer.offset == 0 && memcmp(bytes, before, sizeof(bytes)) == 0);
     buffer.offset = 5;
-    assert(gfx_bytebuf_append(&buffer, a, sizeof(a)) == GFX_BYTEBUF_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_append(&buffer, a, sizeof(a)) == GFX_ERROR_INVALID_ARGUMENT);
     assert(buffer.offset == 5 && memcmp(bytes, before, sizeof(bytes)) == 0);
 }
 
@@ -134,7 +134,7 @@ static void test_stream_push(void)
     gfx_cmd_header_t header;
 
     assert(gfx_stream_push(&stream, GFX_OP_WINDOW_CREATE, 7, &window,
-        sizeof(window), title, 3) == GFX_STREAM_OK);
+        sizeof(window), title, 3) == GFX_OK);
     assert(stream.bytes.offset == sizeof(window) + 4);
     memcpy(&header, bytes, sizeof(header));
     assert(header.opcode == GFX_OP_WINDOW_CREATE);
@@ -145,11 +145,11 @@ static void test_stream_push(void)
 
     stream.bytes.capacity = stream.bytes.offset;
     assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &header,
-        sizeof(header), NULL, 0) == GFX_STREAM_CAPACITY_EXCEEDED);
+        sizeof(header), NULL, 0) == GFX_ERROR_CAPACITY_EXCEEDED);
     assert(stream.bytes.offset == sizeof(window) + 4);
     assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &header,
-        sizeof(header), NULL, 0) == GFX_STREAM_CAPACITY_EXCEEDED);
-    assert(stream.error == GFX_STREAM_CAPACITY_EXCEEDED);
+        sizeof(header), NULL, 0) == GFX_ERROR_CAPACITY_EXCEEDED);
+    assert(stream.error == GFX_ERROR_CAPACITY_EXCEEDED);
 }
 
 static void test_push_transitions(void)
@@ -196,34 +196,34 @@ static void test_push_transitions(void)
             gfx_stream_t stream = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
             if (initial >= GFX_STREAM_IN_FRAME) {
                 assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0,
-                    &frame, sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+                    &frame, sizeof(frame), NULL, 0) == GFX_OK);
             }
             if (initial == GFX_STREAM_IN_PASS) {
                 assert(gfx_stream_push(&stream, GFX_OP_PASS_BEGIN, 0,
-                    &pass, sizeof(pass), NULL, 0) == GFX_STREAM_OK);
+                    &pass, sizeof(pass), NULL, 0) == GFX_OK);
             }
             uint32_t offset = stream.bytes.offset;
             memcpy(before, bytes, sizeof(bytes));
-            gfx_stream_result_t result = gfx_stream_push(&stream, cases[i].opcode,
+            gfx_result_t result = gfx_stream_push(&stream, cases[i].opcode,
                 0, cmd, cases[i].size, NULL, 0);
             if (!(cases[i].allowed & (1u << initial))) {
-                assert(result == GFX_STREAM_INVALID_ORDER);
+                assert(result == GFX_ERROR_INVALID_ORDER);
                 assert(stream.bytes.offset == offset && stream.state == initial);
                 assert(memcmp(bytes, before, sizeof(bytes)) == 0);
                 assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &end,
                     sizeof(end), NULL, 0) == result);
                 continue;
             }
-            assert(result == GFX_STREAM_OK);
+            assert(result == GFX_OK);
             if (stream.state == GFX_STREAM_IN_PASS) {
                 assert(gfx_stream_push(&stream, GFX_OP_PASS_END, 0,
-                    &end, sizeof(end), NULL, 0) == GFX_STREAM_OK);
+                    &end, sizeof(end), NULL, 0) == GFX_OK);
             }
             if (stream.state == GFX_STREAM_IN_FRAME) {
                 assert(gfx_stream_push(&stream, GFX_OP_FRAME_END, 0,
-                    &frame, sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+                    &frame, sizeof(frame), NULL, 0) == GFX_OK);
             }
-            expect(bytes, stream.bytes.offset, GFX_VALIDATION_OK,
+            expect(bytes, stream.bytes.offset, GFX_OK,
                 stream.bytes.offset, UINT16_MAX);
         }
     }
@@ -241,44 +241,44 @@ static void test_push_failures_and_reset(void)
     const char title[] = "abc";
 
     assert(gfx_stream_push(&stream, 0xffff, 0, &header, sizeof(header),
-        NULL, 0) == GFX_STREAM_UNKNOWN_OPCODE);
+        NULL, 0) == GFX_ERROR_UNKNOWN_OPCODE);
     gfx_stream_reset(&stream);
     assert(gfx_stream_push(&stream, GFX_OP_DRAW, 0, &header, sizeof(header),
-        NULL, 0) == GFX_STREAM_INVALID_COMMAND_SIZE);
+        NULL, 0) == GFX_ERROR_INVALID_COMMAND_SIZE);
     gfx_stream_reset(&stream);
     assert(gfx_stream_push(&stream, GFX_OP_WINDOW_CREATE, 0, &window,
-        sizeof(window), title, 2) == GFX_STREAM_INVALID_PAYLOAD_SIZE);
+        sizeof(window), title, 2) == GFX_ERROR_INVALID_PAYLOAD_SIZE);
     gfx_stream_reset(&stream);
     assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0, &frame,
-        sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+        sizeof(frame), NULL, 0) == GFX_OK);
     assert(stream.state == GFX_STREAM_IN_FRAME && stream.frame_window == 1);
     uint32_t offset = stream.bytes.offset;
     memcpy(before, bytes, sizeof(bytes));
     assert(gfx_stream_push(&stream, GFX_OP_FRAME_END, 0, &other,
-        sizeof(other), NULL, 0) == GFX_STREAM_FRAME_WINDOW_MISMATCH);
+        sizeof(other), NULL, 0) == GFX_ERROR_FRAME_WINDOW_MISMATCH);
     assert(stream.state == GFX_STREAM_IN_FRAME && stream.frame_window == 1);
     assert(stream.bytes.offset == offset && memcmp(bytes, before, sizeof(bytes)) == 0);
 
     gfx_stream_reset(&stream);
     assert(stream.bytes.buf == bytes && stream.bytes.capacity == sizeof(bytes));
     assert(stream.bytes.offset == 0 && stream.state == GFX_STREAM_OUTSIDE_FRAME);
-    assert(stream.error == GFX_STREAM_OK && stream.frame_window == GFX_NULL_HANDLE);
+    assert(stream.error == GFX_OK && stream.frame_window == GFX_NULL_HANDLE);
     stream.bytes.capacity = sizeof(frame) - 1;
     memcpy(before, bytes, sizeof(bytes));
     assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0, &frame,
-        sizeof(frame), NULL, 0) == GFX_STREAM_CAPACITY_EXCEEDED);
+        sizeof(frame), NULL, 0) == GFX_ERROR_CAPACITY_EXCEEDED);
     assert(stream.bytes.offset == 0 && stream.state == GFX_STREAM_OUTSIDE_FRAME);
     assert(stream.frame_window == GFX_NULL_HANDLE && memcmp(bytes, before, sizeof(bytes)) == 0);
 
     gfx_stream_reset(&stream);
     stream.bytes.capacity = sizeof(bytes);
     assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0, &frame,
-        sizeof(frame), NULL, 0) == GFX_STREAM_OK);
-    expect(bytes, stream.bytes.offset, GFX_VALIDATION_INCOMPLETE_FRAME,
+        sizeof(frame), NULL, 0) == GFX_OK);
+    expect(bytes, stream.bytes.offset, GFX_ERROR_INCOMPLETE_FRAME,
         stream.bytes.offset, UINT16_MAX);
     gfx_stream_reset(&stream);
     assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &header, sizeof(header),
-        title, UINT32_MAX) == GFX_STREAM_SIZE_OVERFLOW);
+        title, UINT32_MAX) == GFX_ERROR_SIZE_OVERFLOW);
 }
 
 static void test_push_payload_sizes(void)
@@ -308,28 +308,28 @@ static void test_push_payload_sizes(void)
             gfx_stream_t stream = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
             if (cases[i].opcode == GFX_OP_BIND_UNIFORM) {
                 assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0,
-                    &frame, sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+                    &frame, sizeof(frame), NULL, 0) == GFX_OK);
                 assert(gfx_stream_push(&stream, GFX_OP_PASS_BEGIN, 0,
-                    &pass, sizeof(pass), NULL, 0) == GFX_STREAM_OK);
+                    &pass, sizeof(pass), NULL, 0) == GFX_OK);
             }
             uint32_t offset = stream.bytes.offset;
             gfx_stream_state_t state = stream.state;
-            gfx_stream_result_t result = gfx_stream_push(&stream, cases[i].opcode, 0,
+            gfx_result_t result = gfx_stream_push(&stream, cases[i].opcode, 0,
                 cases[i].cmd, cases[i].size, payload, cases[i].payload - !valid);
             if (!valid) {
-                assert(result == GFX_STREAM_INVALID_PAYLOAD_SIZE);
+                assert(result == GFX_ERROR_INVALID_PAYLOAD_SIZE);
                 assert(stream.bytes.offset == offset && stream.state == state);
                 continue;
             }
-            assert(result == GFX_STREAM_OK);
+            assert(result == GFX_OK);
             assert(memcmp(bytes + offset + cases[i].size, payload, cases[i].payload) == 0);
             if (stream.state == GFX_STREAM_IN_PASS) {
                 assert(gfx_stream_push(&stream, GFX_OP_PASS_END, 0,
-                    &end, sizeof(end), NULL, 0) == GFX_STREAM_OK);
+                    &end, sizeof(end), NULL, 0) == GFX_OK);
                 assert(gfx_stream_push(&stream, GFX_OP_FRAME_END, 0,
-                    &frame, sizeof(frame), NULL, 0) == GFX_STREAM_OK);
+                    &frame, sizeof(frame), NULL, 0) == GFX_OK);
             }
-            expect(bytes, stream.bytes.offset, GFX_VALIDATION_OK,
+            expect(bytes, stream.bytes.offset, GFX_OK,
                 stream.bytes.offset, UINT16_MAX);
         }
     }
@@ -372,7 +372,7 @@ static void test_fixed_commands(void)
             append(&stream, GFX_OP_PASS_END, &end, sizeof(end), 0);
             append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
         }
-        expect(stream.bytes, stream.size, GFX_VALIDATION_OK, stream.size, UINT16_MAX);
+        expect(stream.bytes, stream.size, GFX_OK, stream.size, UINT16_MAX);
     }
 }
 
@@ -407,7 +407,7 @@ static void test_payloads(void)
     append(&stream, GFX_OP_BIND_UNIFORM, &uniform, sizeof(uniform), uniform.data_size);
     append(&stream, GFX_OP_PASS_END, &end, sizeof(end), 0);
     append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_OK, stream.size, UINT16_MAX);
+    expect(stream.bytes, stream.size, GFX_OK, stream.size, UINT16_MAX);
 
     for (size_t i = 0; i < sizeof(positions) / sizeof(positions[0]); i++) {
         gfx_cmd_header_t header;
@@ -416,7 +416,7 @@ static void test_payloads(void)
         uint16_t opcode = header.opcode;
         header.byte_size -= 4;
         memcpy(stream.bytes + pos, &header, sizeof(header));
-        expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_PAYLOAD_SIZE, pos, opcode);
+        expect(stream.bytes, stream.size, GFX_ERROR_INVALID_PAYLOAD_SIZE, pos, opcode);
         header.byte_size += 4;
         memcpy(stream.bytes + pos, &header, sizeof(header));
     }
@@ -424,7 +424,7 @@ static void test_payloads(void)
     memcpy(stream.bytes + positions[1], &buffer, sizeof(buffer));
     gfx_cmd_header_t header = {GFX_OP_BUFFER_UPLOAD, 0, sizeof(buffer)};
     memcpy(stream.bytes + positions[1], &header, sizeof(header));
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_PAYLOAD_SIZE,
+    expect(stream.bytes, stream.size, GFX_ERROR_INVALID_PAYLOAD_SIZE,
         positions[1], GFX_OP_BUFFER_UPLOAD);
 }
 
@@ -440,43 +440,43 @@ static void test_order(void)
     uint32_t pos;
 
     append(&stream, GFX_OP_DRAW, &draw, sizeof(draw), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_ORDER, 0, GFX_OP_DRAW);
+    expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_DRAW);
     stream.size = 0;
     append(&stream, GFX_OP_PASS_END, &end, sizeof(end), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_ORDER, 0, GFX_OP_PASS_END);
+    expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_PASS_END);
     stream.size = 0;
     append(&stream, GFX_OP_PASS_BEGIN, &pass, sizeof(pass), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_ORDER, 0, GFX_OP_PASS_BEGIN);
+    expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_PASS_BEGIN);
     stream.size = 0;
     append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_ORDER, 0, GFX_OP_FRAME_END);
+    expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_FRAME_END);
     stream.size = 0;
     append(&stream, GFX_OP_FRAME_BEGIN, &frame, sizeof(frame), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INCOMPLETE_FRAME, stream.size, UINT16_MAX);
+    expect(stream.bytes, stream.size, GFX_ERROR_INCOMPLETE_FRAME, stream.size, UINT16_MAX);
     pos = stream.size;
     append(&stream, GFX_OP_FRAME_BEGIN, &frame, sizeof(frame), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_ORDER, pos, GFX_OP_FRAME_BEGIN);
+    expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_FRAME_BEGIN);
     stream.size = pos;
     append(&stream, GFX_OP_FRAME_END, &other, sizeof(other), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_FRAME_WINDOW_MISMATCH, pos, GFX_OP_FRAME_END);
+    expect(stream.bytes, stream.size, GFX_ERROR_FRAME_WINDOW_MISMATCH, pos, GFX_OP_FRAME_END);
     stream.size = pos;
     append(&stream, GFX_OP_PASS_BEGIN, &pass, sizeof(pass), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INCOMPLETE_PASS, stream.size, UINT16_MAX);
+    expect(stream.bytes, stream.size, GFX_ERROR_INCOMPLETE_PASS, stream.size, UINT16_MAX);
     pos = stream.size;
     append(&stream, GFX_OP_PASS_BEGIN, &pass, sizeof(pass), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_ORDER, pos, GFX_OP_PASS_BEGIN);
+    expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_PASS_BEGIN);
     stream.size = pos;
     append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_ORDER, pos, GFX_OP_FRAME_END);
+    expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_FRAME_END);
     stream.size = pos;
     append(&stream, GFX_OP_BUFFER_CREATE, &buffer, sizeof(buffer), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_INVALID_ORDER, pos, GFX_OP_BUFFER_CREATE);
+    expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_BUFFER_CREATE);
     stream.size = pos;
     append(&stream, GFX_OP_PASS_END, &end, sizeof(end), 0);
     append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
     append(&stream, GFX_OP_FRAME_BEGIN, &other, sizeof(other), 0);
     append(&stream, GFX_OP_FRAME_END, &other, sizeof(other), 0);
-    expect(stream.bytes, stream.size, GFX_VALIDATION_OK, stream.size, UINT16_MAX);
+    expect(stream.bytes, stream.size, GFX_OK, stream.size, UINT16_MAX);
 }
 
 int main(void)

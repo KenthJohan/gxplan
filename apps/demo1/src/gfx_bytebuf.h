@@ -2,6 +2,7 @@
 #define GFX_BYTEBUF_H
 
 #include <stdint.h>
+#include "gfx_result.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,22 +20,15 @@ typedef struct {
     uint32_t size;
 } gfx_bytebuf_span_t;
 
-typedef enum {
-    GFX_BYTEBUF_OK = 0,
-    GFX_BYTEBUF_INVALID_ARGUMENT,
-    GFX_BYTEBUF_SIZE_OVERFLOW,
-    GFX_BYTEBUF_CAPACITY_EXCEEDED
-} gfx_bytebuf_result_t;
-
 /*
  * Append bytes to caller-owned storage. A zero-length span may have NULL data.
  * Source ranges must not overlap the destination range or the buffer metadata;
  * the span array must not overlap the destination range.
  * On failure, neither the buffer contents nor its offset are changed.
  */
-gfx_bytebuf_result_t gfx_bytebuf_append(gfx_bytebuf_t *buffer,
+gfx_result_t gfx_bytebuf_append(gfx_bytebuf_t *buffer,
     const void *data, uint32_t size);
-gfx_bytebuf_result_t gfx_bytebuf_appendv(gfx_bytebuf_t *buffer,
+gfx_result_t gfx_bytebuf_appendv(gfx_bytebuf_t *buffer,
     const gfx_bytebuf_span_t *spans, uint32_t count);
 
 #ifdef __cplusplus

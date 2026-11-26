@@ -30,12 +30,12 @@ void run_dynamic_loop(void *backend_ctx)
 
 	/* (Assume shaders & PIPE_ID are created here too) */
 
-	if (s.error != GFX_STREAM_OK) {
+	if (s.error != GFX_OK) {
 		fprintf(stderr, "Unable to record startup stream: error %d\n", s.error);
 		return;
 	}
 	gfx_validation_result_t result = gfx_validate_stream(s.bytes.buf, s.bytes.offset);
-	if (result.code != GFX_VALIDATION_OK) {
+	if (result.code != GFX_OK) {
 		fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
 			result.code, result.offset, result.opcode);
 		return;
@@ -96,12 +96,12 @@ void run_dynamic_loop(void *backend_ctx)
 		gfx_stream_push(&s, GFX_OP_FRAME_END, 0, &frame, sizeof(frame), NULL, 0);
 
 		/* E. Execute the frame's command stream */
-		if (s.error != GFX_STREAM_OK) {
+		if (s.error != GFX_OK) {
 			fprintf(stderr, "Unable to record frame stream: error %d\n", s.error);
 			return;
 		}
 		result = gfx_validate_stream(s.bytes.buf, s.bytes.offset);
-		if (result.code != GFX_VALIDATION_OK) {
+		if (result.code != GFX_OK) {
 			fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
 				result.code, result.offset, result.opcode);
 			return;

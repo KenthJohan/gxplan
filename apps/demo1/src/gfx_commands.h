@@ -2,6 +2,7 @@
 #define GFX_COMMANDS_H
 
 #include "gfx_opcodes.h"
+#include "gfx_result.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -205,22 +206,8 @@ typedef struct {
     int32_t          vertex_offset;
 } cmd_draw_indexed_t;
 
-typedef enum {
-    GFX_VALIDATION_OK = 0,
-    GFX_VALIDATION_NULL_STREAM,
-    GFX_VALIDATION_TRUNCATED_HEADER,
-    GFX_VALIDATION_INVALID_RECORD_SIZE,
-    GFX_VALIDATION_TRUNCATED_RECORD,
-    GFX_VALIDATION_UNKNOWN_OPCODE,
-    GFX_VALIDATION_INVALID_PAYLOAD_SIZE,
-    GFX_VALIDATION_INVALID_ORDER,
-    GFX_VALIDATION_FRAME_WINDOW_MISMATCH,
-    GFX_VALIDATION_INCOMPLETE_FRAME,
-    GFX_VALIDATION_INCOMPLETE_PASS
-} gfx_validation_code_t;
-
 typedef struct {
-    gfx_validation_code_t code;
+    gfx_result_t code;
     uint32_t offset;
     /* UINT16_MAX means no complete header was available. */
     uint16_t opcode;

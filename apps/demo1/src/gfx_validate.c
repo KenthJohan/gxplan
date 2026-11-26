@@ -3,13 +3,13 @@
 #include <string.h>
 
 static gfx_validation_result_t validation_result(
-    gfx_validation_code_t code, uint32_t offset, uint16_t opcode)
+    gfx_result_t code, uint32_t offset, uint16_t opcode)
 {
     gfx_validation_result_t result = {code, offset, opcode};
     return result;
 }
 
-gfx_validation_code_t gfx_command_layout(uint16_t opcode, const void *cmd,
+gfx_result_t gfx_command_layout(uint16_t opcode, const void *cmd,
     uint32_t available, uint32_t *fixed_size_out, uint64_t *payload_size_out)
 {
     uint32_t fixed_size = 0;
@@ -44,10 +44,10 @@ gfx_validation_code_t gfx_command_layout(uint16_t opcode, const void *cmd,
     case GFX_OP_DRAW: fixed_size = sizeof(cmd_draw_t); break;
     case GFX_OP_DRAW_INDEXED: fixed_size = sizeof(cmd_draw_indexed_t); break;
     default:
-        return GFX_VALIDATION_UNKNOWN_OPCODE;
+        return GFX_ERROR_UNKNOWN_OPCODE;
     }
     if (available < fixed_size) {
-        return GFX_VALIDATION_INVALID_RECORD_SIZE;
+        return GFX_ERROR_INVALID_RECORD_SIZE;
     }
 
     switch (opcode) {
@@ -92,10 +92,10 @@ gfx_validation_code_t gfx_command_layout(uint16_t opcode, const void *cmd,
 
     *fixed_size_out = fixed_size;
     *payload_size_out = payload_size;
-    return GFX_VALIDATION_OK;
+    return GFX_OK;
 }
 
-gfx_validation_code_t gfx_command_transition(uint16_t opcode, const void *cmd,
+gfx_result_t gfx_command_transition(uint16_t opcode, const void *cmd,
     gfx_stream_state_t *state, gfx_handle_t *frame_window)
 {
     switch (opcode) {
@@ -103,7 +103,7 @@ gfx_validation_code_t gfx_command_transition(uint16_t opcode, const void *cmd,
     case GFX_OP_FRAME_BEGIN: {
         cmd_frame_t value;
         if (*state != GFX_STREAM_OUTSIDE_FRAME) {
-            return GFX_VALIDATION_INVALID_ORDER;
+            return GFX_ERROR_INVALID_ORDER;
         }
         memcpy(&value, cmd, sizeof(value));
         *frame_window = value.window_id;
@@ -113,11 +113,11 @@ gfx_validation_code_t gfx_command_transition(uint16_t opcode, const void *cmd,
     case GFX_OP_FRAME_END: {
         cmd_frame_t value;
         if (*state != GFX_STREAM_IN_FRAME) {
-            return GFX_VALIDATION_INVALID_ORDER;
+            return GFX_ERROR_INVALID_ORDER;
         }
         memcpy(&value, cmd, sizeof(value));
         if (value.window_id != *frame_window) {
-            return GFX_VALIDATION_FRAME_WINDOW_MISMATCH;
+            return GFX_ERROR_FRAME_WINDOW_MISMATCH;
         }
         *frame_window = GFX_NULL_HANDLE;
         *state = GFX_STREAM_OUTSIDE_FRAME;
@@ -125,13 +125,13 @@ gfx_validation_code_t gfx_command_transition(uint16_t opcode, const void *cmd,
     }
     case GFX_OP_PASS_BEGIN:
         if (*state != GFX_STREAM_IN_FRAME) {
-            return GFX_VALIDATION_INVALID_ORDER;
+            return GFX_ERROR_INVALID_ORDER;
         }
         *state = GFX_STREAM_IN_PASS;
         break;
     case GFX_OP_PASS_END:
         if (*state != GFX_STREAM_IN_PASS) {
-            return GFX_VALIDATION_INVALID_ORDER;
+            return GFX_ERROR_INVALID_ORDER;
         }
         *state = GFX_STREAM_IN_FRAME;
         break;
@@ -145,16 +145,16 @@ gfx_validation_code_t gfx_command_transition(uint16_t opcode, const void *cmd,
     case GFX_OP_DRAW:
     case GFX_OP_DRAW_INDEXED:
         if (*state != GFX_STREAM_IN_PASS) {
-            return GFX_VALIDATION_INVALID_ORDER;
+            return GFX_ERROR_INVALID_ORDER;
         }
         break;
     default:
         if (*state == GFX_STREAM_IN_PASS) {
-            return GFX_VALIDATION_INVALID_ORDER;
+            return GFX_ERROR_INVALID_ORDER;
         }
         break;
     }
-    return GFX_VALIDATION_OK;
+    return GFX_OK;
 }
 
 gfx_validation_result_t gfx_validate_stream(const void *cmd_stream, uint32_t stream_bytes)
@@ -165,46 +165,46 @@ gfx_validation_result_t gfx_validate_stream(const void *cmd_stream, uint32_t str
     gfx_stream_state_t state = GFX_STREAM_OUTSIDE_FRAME;
 
     if (!bytes && stream_bytes) {
-        return validation_result(GFX_VALIDATION_NULL_STREAM, 0, UINT16_MAX);
+        return validation_result(GFX_ERROR_NULL_STREAM, 0, UINT16_MAX);
     }
 
     while (offset < stream_bytes) {
         gfx_cmd_header_t header;
         uint32_t fixed_size;
         uint64_t payload_size;
-        gfx_validation_code_t code;
+        gfx_result_t code;
         uint32_t remaining = stream_bytes - offset;
         if (remaining < sizeof(header)) {
-            return validation_result(GFX_VALIDATION_TRUNCATED_HEADER, offset, UINT16_MAX);
+            return validation_result(GFX_ERROR_TRUNCATED_HEADER, offset, UINT16_MAX);
         }
         memcpy(&header, bytes + offset, sizeof(header));
         if (header.byte_size < sizeof(header) || (header.byte_size & 3u)) {
-            return validation_result(GFX_VALIDATION_INVALID_RECORD_SIZE, offset, header.opcode);
+            return validation_result(GFX_ERROR_INVALID_RECORD_SIZE, offset, header.opcode);
         }
         if (header.byte_size > remaining) {
-            return validation_result(GFX_VALIDATION_TRUNCATED_RECORD, offset, header.opcode);
+            return validation_result(GFX_ERROR_TRUNCATED_RECORD, offset, header.opcode);
         }
         code = gfx_command_layout(header.opcode, bytes + offset, header.byte_size,
             &fixed_size, &payload_size);
-        if (code != GFX_VALIDATION_OK) {
+        if (code != GFX_OK) {
             return validation_result(code, offset, header.opcode);
         }
         if ((uint64_t)fixed_size + ((payload_size + 3u) & ~(uint64_t)3u)
             != header.byte_size) {
-            return validation_result(GFX_VALIDATION_INVALID_PAYLOAD_SIZE, offset, header.opcode);
+            return validation_result(GFX_ERROR_INVALID_PAYLOAD_SIZE, offset, header.opcode);
         }
         code = gfx_command_transition(header.opcode, bytes + offset, &state, &frame_window);
-        if (code != GFX_VALIDATION_OK) {
+        if (code != GFX_OK) {
             return validation_result(code, offset, header.opcode);
         }
         offset += header.byte_size;
     }
 
     if (state == GFX_STREAM_IN_PASS) {
-        return validation_result(GFX_VALIDATION_INCOMPLETE_PASS, offset, UINT16_MAX);
+        return validation_result(GFX_ERROR_INCOMPLETE_PASS, offset, UINT16_MAX);
     }
     if (state == GFX_STREAM_IN_FRAME) {
-        return validation_result(GFX_VALIDATION_INCOMPLETE_FRAME, offset, UINT16_MAX);
+        return validation_result(GFX_ERROR_INCOMPLETE_FRAME, offset, UINT16_MAX);
     }
-    return validation_result(GFX_VALIDATION_OK, offset, UINT16_MAX);
+    return validation_result(GFX_OK, offset, UINT16_MAX);
 }
