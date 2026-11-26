@@ -40,6 +40,7 @@ typedef struct {
  * command and optional payload. The first error is retained; a failed push
  * changes neither the bytes nor the state. Full-stream validation is still
  * required before execution to detect unfinished frames/passes.
+ * Command and payload storage must not overlap the appended destination.
  */
 void gfx_stream_reset(gfx_stream_t *stream);
 

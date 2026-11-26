@@ -22,6 +22,7 @@ gfx_stream_result_t gfx_stream_push(gfx_stream_t *stream, uint16_t opcode,
     gfx_stream_state_t next_state;
     gfx_handle_t next_window;
     gfx_validation_code_t validation;
+    gfx_bytebuf_result_t append_result;
 
     if (!stream) {
         return GFX_STREAM_INVALID_ARGUMENT;
@@ -67,26 +68,33 @@ gfx_stream_result_t gfx_stream_push(gfx_stream_t *stream, uint16_t opcode,
             ? GFX_STREAM_FRAME_WINDOW_MISMATCH : GFX_STREAM_INVALID_ORDER;
         return stream->error;
     }
-    if (total_size > (uint64_t)stream->bytes.capacity - stream->bytes.offset) {
-        stream->error = GFX_STREAM_CAPACITY_EXCEEDED;
-        return stream->error;
-    }
-
     memcpy(&header, cmd, sizeof(header));
     header.opcode = opcode;
     header.flags = flags;
     header.byte_size = (uint32_t)total_size;
 
-    memcpy(stream->bytes.buf + stream->bytes.offset, cmd, cmd_size);
-    memcpy(stream->bytes.buf + stream->bytes.offset, &header, sizeof(header));
-    if (extra_size) {
-        memcpy(stream->bytes.buf + stream->bytes.offset + cmd_size, extra, extra_size);
-        if (padded_extra > extra_size) {
-            memset(stream->bytes.buf + stream->bytes.offset + cmd_size + extra_size, 0,
-                (size_t)(padded_extra - extra_size));
-        }
+    const uint8_t padding[3] = {0};
+    const gfx_bytebuf_span_t spans[] = {
+        {&header, sizeof(header)},
+        {(const uint8_t *)cmd + sizeof(header), cmd_size - sizeof(header)},
+        {extra, extra_size},
+        {padding, (uint32_t)(padded_extra - extra_size)}
+    };
+    append_result = gfx_bytebuf_appendv(&stream->bytes, spans,
+        sizeof(spans) / sizeof(spans[0]));
+    switch (append_result) {
+    case GFX_BYTEBUF_OK:
+        break;
+    case GFX_BYTEBUF_INVALID_ARGUMENT:
+        stream->error = GFX_STREAM_INVALID_ARGUMENT;
+        return stream->error;
+    case GFX_BYTEBUF_SIZE_OVERFLOW:
+        stream->error = GFX_STREAM_SIZE_OVERFLOW;
+        return stream->error;
+    case GFX_BYTEBUF_CAPACITY_EXCEEDED:
+        stream->error = GFX_STREAM_CAPACITY_EXCEEDED;
+        return stream->error;
     }
-    stream->bytes.offset += (uint32_t)total_size;
     stream->state = next_state;
     stream->frame_window = next_window;
     return GFX_STREAM_OK;

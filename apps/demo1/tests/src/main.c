@@ -4,6 +4,7 @@
 
 /* Compile the production validator into this standalone test application. */
 #include "../../src/gfx_validate.c"
+#include "../../src/gfx_bytebuf.c"
 #include "../../src/gfx_stream.c"
 #include "../../src/test_record_two_pass_demo.c"
 
@@ -77,6 +78,51 @@ static void test_boundaries(void)
     memcpy(bytes + 1, &header, sizeof(header));
     expect(bytes + 1, 8, GFX_VALIDATION_OK, 8, UINT16_MAX);
     expect(bytes + 1, 9, GFX_VALIDATION_TRUNCATED_HEADER, 8, UINT16_MAX);
+}
+
+static void test_bytebuf_append(void)
+{
+    uint8_t bytes[8] = {0};
+    uint8_t before[sizeof(bytes)];
+    const uint8_t a[] = {1, 2, 3};
+    const uint8_t b[] = {4, 5};
+    gfx_bytebuf_t buffer = {bytes, 0, sizeof(bytes)};
+    gfx_bytebuf_t empty = {0};
+    gfx_bytebuf_span_t spans[] = {{a, sizeof(a)}, {NULL, 0}, {b, sizeof(b)}};
+    gfx_bytebuf_span_t overflow[] = {{a, UINT32_MAX}, {b, 1}};
+
+    assert(gfx_bytebuf_append(NULL, a, sizeof(a)) == GFX_BYTEBUF_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_appendv(&empty, NULL, 0) == GFX_BYTEBUF_OK);
+    assert(gfx_bytebuf_append(&empty, NULL, 0) == GFX_BYTEBUF_OK);
+    assert(gfx_bytebuf_append(&empty, a, 1) == GFX_BYTEBUF_CAPACITY_EXCEEDED);
+    empty.capacity = 1;
+    assert(gfx_bytebuf_append(&empty, a, 1) == GFX_BYTEBUF_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_append(&buffer, NULL, 0) == GFX_BYTEBUF_OK);
+    assert(gfx_bytebuf_append(&buffer, a, sizeof(a)) == GFX_BYTEBUF_OK);
+    assert(buffer.offset == sizeof(a) && memcmp(bytes, a, sizeof(a)) == 0);
+    assert(gfx_bytebuf_appendv(&buffer, spans, 3) == GFX_BYTEBUF_OK);
+    assert(buffer.offset == sizeof(bytes));
+    assert(memcmp(bytes + 3, a, sizeof(a)) == 0);
+    assert(memcmp(bytes + 6, b, sizeof(b)) == 0);
+
+    memcpy(before, bytes, sizeof(bytes));
+    assert(gfx_bytebuf_append(&buffer, b, sizeof(b)) == GFX_BYTEBUF_CAPACITY_EXCEEDED);
+    assert(gfx_bytebuf_append(&buffer, NULL, 1) == GFX_BYTEBUF_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_appendv(&buffer, NULL, 1) == GFX_BYTEBUF_INVALID_ARGUMENT);
+    assert(gfx_bytebuf_appendv(&buffer, overflow, 2) == GFX_BYTEBUF_SIZE_OVERFLOW);
+    assert(buffer.offset == sizeof(bytes) && memcmp(bytes, before, sizeof(bytes)) == 0);
+
+    buffer.offset = 0;
+    spans[1].size = 1;
+    assert(gfx_bytebuf_appendv(&buffer, spans, 3) == GFX_BYTEBUF_INVALID_ARGUMENT);
+    assert(buffer.offset == 0 && memcmp(bytes, before, sizeof(bytes)) == 0);
+    spans[1].size = 0;
+    buffer.capacity = 4;
+    assert(gfx_bytebuf_appendv(&buffer, spans, 3) == GFX_BYTEBUF_CAPACITY_EXCEEDED);
+    assert(buffer.offset == 0 && memcmp(bytes, before, sizeof(bytes)) == 0);
+    buffer.offset = 5;
+    assert(gfx_bytebuf_append(&buffer, a, sizeof(a)) == GFX_BYTEBUF_INVALID_ARGUMENT);
+    assert(buffer.offset == 5 && memcmp(bytes, before, sizeof(bytes)) == 0);
 }
 
 static void test_stream_push(void)
@@ -437,6 +483,7 @@ int main(void)
 {
     unsigned executions = 0;
     test_boundaries();
+    test_bytebuf_append();
     test_stream_push();
     test_push_transitions();
     test_push_failures_and_reset();
