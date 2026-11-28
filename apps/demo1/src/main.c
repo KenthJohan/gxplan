@@ -37,7 +37,7 @@ void run_dynamic_loop(void *backend_ctx)
 	gfx_validation_result_t result = gfx_validate_stream(s.bytes.buf, s.bytes.offset);
 	if (result.code != GFX_OK) {
 		fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
-			result.code, result.offset, result.opcode);
+		result.code, result.offset, result.opcode);
 		return;
 	}
 	gfx_execute_stream(backend_ctx, s.bytes.buf, s.bytes.offset);
@@ -69,9 +69,9 @@ void run_dynamic_loop(void *backend_ctx)
 		if (vert_count > 0) {
 			uint32_t            upload_bytes = vert_count * sizeof(float) * 2;
 			cmd_buffer_upload_t bu           = {
-			.buffer_id  = DYN_VBUF,
-			.dst_offset = 0,
-			.data_size  = upload_bytes};
+			          .buffer_id  = DYN_VBUF,
+			          .dst_offset = 0,
+			          .data_size  = upload_bytes};
 			gfx_stream_push(&s, GFX_OP_BUFFER_UPLOAD, 0, &bu, sizeof(bu), verts, upload_bytes);
 		}
 
@@ -103,7 +103,7 @@ void run_dynamic_loop(void *backend_ctx)
 		result = gfx_validate_stream(s.bytes.buf, s.bytes.offset);
 		if (result.code != GFX_OK) {
 			fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
-				result.code, result.offset, result.opcode);
+			result.code, result.offset, result.opcode);
 			return;
 		}
 		gfx_execute_stream(backend_ctx, s.bytes.buf, s.bytes.offset);

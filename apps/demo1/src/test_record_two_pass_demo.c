@@ -20,7 +20,7 @@ void record_two_pass_demo(void *backend_ctx)
 	/* --- A. ONE-TIME SETUP --- */
 	const char         *title = "Two-Pass Demo";
 	cmd_window_create_t win   = {
-	.window_id = WIN_ID, .swapchain_tex_id = SWAPCHAIN_TEX, .width = 800, .height = 600, .present_mode = GFX_PRESENT_VSYNC, .title_len = (uint16_t)strlen(title)};
+	  .window_id = WIN_ID, .swapchain_tex_id = SWAPCHAIN_TEX, .width = 800, .height = 600, .present_mode = GFX_PRESENT_VSYNC, .title_len = (uint16_t)strlen(title)};
 	gfx_stream_push(&s, GFX_OP_WINDOW_CREATE, 0, &win, sizeof(win), title, win.title_len);
 
 	/* Create offscreen color texture (sampled in Pass 2, render target in Pass 1) */
@@ -88,7 +88,7 @@ void record_two_pass_demo(void *backend_ctx)
 	gfx_validation_result_t result = gfx_validate_stream(s.bytes.buf, s.bytes.offset);
 	if (result.code != GFX_OK) {
 		fprintf(stderr, "Invalid command stream: error %d at byte %u (opcode %u)\n",
-			result.code, result.offset, result.opcode);
+		result.code, result.offset, result.opcode);
 		return;
 	}
 	gfx_execute_stream(backend_ctx, s.bytes.buf, s.bytes.offset);

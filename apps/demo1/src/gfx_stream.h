@@ -9,16 +9,16 @@ extern "C" {
 #endif
 
 typedef enum {
-    GFX_STREAM_OUTSIDE_FRAME = 0,
-    GFX_STREAM_IN_FRAME,
-    GFX_STREAM_IN_PASS
+	GFX_STREAM_OUTSIDE_FRAME = 0,
+	GFX_STREAM_IN_FRAME,
+	GFX_STREAM_IN_PASS
 } gfx_stream_state_t;
 
 typedef struct {
-    gfx_bytebuf_t bytes;
-    gfx_stream_state_t state;
-    gfx_handle_t frame_window;
-    gfx_result_t error;
+	gfx_bytebuf_t      bytes;
+	gfx_stream_state_t state;
+	gfx_handle_t       frame_window;
+	gfx_result_t       error;
 } gfx_stream_t;
 
 /*
@@ -33,8 +33,8 @@ typedef struct {
 void gfx_stream_reset(gfx_stream_t *stream);
 
 gfx_result_t gfx_stream_push(gfx_stream_t *stream, uint16_t opcode,
-    uint16_t flags, const void *cmd, uint32_t cmd_size,
-    const void *extra, uint32_t extra_size);
+uint16_t flags, const void *cmd, uint32_t cmd_size,
+const void *extra, uint32_t extra_size);
 
 #ifdef __cplusplus
 }

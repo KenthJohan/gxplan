@@ -10,14 +10,14 @@ extern "C" {
 
 /* Caller-owned storage; offset is the number of bytes written. */
 typedef struct {
-    uint8_t *buf;
-    uint32_t offset;
-    uint32_t capacity;
+	uint8_t *buf;
+	uint32_t offset;
+	uint32_t capacity;
 } gfx_bytebuf_t;
 
 typedef struct {
-    const void *data;
-    uint32_t size;
+	const void *data;
+	uint32_t    size;
 } gfx_bytebuf_span_t;
 
 /*
@@ -27,9 +27,9 @@ typedef struct {
  * On failure, neither the buffer contents nor its offset are changed.
  */
 gfx_result_t gfx_bytebuf_append(gfx_bytebuf_t *buffer,
-    const void *data, uint32_t size);
+const void *data, uint32_t size);
 gfx_result_t gfx_bytebuf_appendv(gfx_bytebuf_t *buffer,
-    const gfx_bytebuf_span_t *spans, uint32_t count);
+const gfx_bytebuf_span_t *spans, uint32_t count);
 
 #ifdef __cplusplus
 }
