@@ -26,10 +26,8 @@ typedef struct {
  * the span array must not overlap the destination range.
  * On failure, neither the buffer contents nor its offset are changed.
  */
-gfx_result_t gfx_bytebuf_append(gfx_bytebuf_t *buffer,
-const void *data, uint32_t size);
-gfx_result_t gfx_bytebuf_appendv(gfx_bytebuf_t *buffer,
-const gfx_bytebuf_span_t *spans, uint32_t count);
+gfx_result_t gfx_bytebuf_append(gfx_bytebuf_t *buffer, const void *data, uint32_t size);
+gfx_result_t gfx_bytebuf_appendv(gfx_bytebuf_t *buffer, const gfx_bytebuf_span_t *spans, uint32_t count);
 
 #ifdef __cplusplus
 }
