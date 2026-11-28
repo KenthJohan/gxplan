@@ -36,6 +36,16 @@ gfx_result_t gfx_stream_push(gfx_stream_t *stream, uint16_t opcode,
 uint16_t flags, const void *cmd, uint32_t cmd_size,
 const void *extra, uint32_t extra_size);
 
+/*
+ * Appends a record without validating its opcode, command layout, payload
+ * size, or ordering. Basic buffer arguments, record alignment, and capacity
+ * are still checked. Command and payload storage must not overlap the
+ * appended destination. Validate the complete stream before execution.
+ */
+gfx_result_t gfx_stream_push_unsafe(gfx_stream_t *stream, uint16_t opcode,
+uint16_t flags, const void *cmd, uint32_t cmd_size,
+const void *extra, uint32_t extra_size);
+
 #ifdef __cplusplus
 }
 #endif

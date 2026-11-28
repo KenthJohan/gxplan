@@ -16,23 +16,6 @@ int32_t gfx_execute_stream(void *backend_ctx, const void *stream, uint32_t size)
 	return 0;
 }
 
-typedef struct {
-	uint8_t  bytes[1024];
-	uint32_t size;
-} test_stream_t;
-
-static void append(test_stream_t *stream, uint16_t opcode, const void *cmd,
-uint32_t fixed_size, uint32_t payload_size)
-{
-	uint32_t         padded = (payload_size + 3u) & ~3u;
-	gfx_cmd_header_t header = {opcode, 0, fixed_size + padded};
-	assert(stream->size + header.byte_size <= sizeof(stream->bytes));
-	memcpy(stream->bytes + stream->size, cmd, fixed_size);
-	memcpy(stream->bytes + stream->size, &header, sizeof(header));
-	memset(stream->bytes + stream->size + fixed_size, 0, padded);
-	stream->size += header.byte_size;
-}
-
 static void expect(const void *stream, uint32_t size, gfx_result_t code,
 uint32_t offset, uint16_t opcode)
 {
@@ -150,6 +133,18 @@ static void test_stream_push(void)
 	assert(gfx_stream_push(&stream, GFX_OP_NOP, 0, &header,
 	       sizeof(header), NULL, 0) == GFX_ERROR_CAPACITY_EXCEEDED);
 	assert(stream.error == GFX_ERROR_CAPACITY_EXCEEDED);
+}
+
+static void test_stream_push_unsafe(void)
+{
+	uint8_t          bytes[16] = {0};
+	gfx_cmd_header_t header    = {0};
+	gfx_stream_t     stream    = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
+
+	assert(gfx_stream_push_unsafe(&stream, 0xffff, 0, &header,
+	       sizeof(header), NULL, 0) == GFX_OK);
+	assert(stream.state == GFX_STREAM_OUTSIDE_FRAME);
+	expect(bytes, stream.bytes.offset, GFX_ERROR_UNKNOWN_OPCODE, 0, 0xffff);
 }
 
 static void test_push_transitions(void)
@@ -371,121 +366,155 @@ static void test_fixed_commands(void)
 	gfx_cmd_header_t end       = {0};
 
 	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-		test_stream_t stream = {0};
+		uint8_t      bytes[1024] = {0};
+		gfx_stream_t stream      = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
 		if (cases[i].pass) {
-			append(&stream, GFX_OP_FRAME_BEGIN, &frame, sizeof(frame), 0);
-			append(&stream, GFX_OP_PASS_BEGIN, &pass, sizeof(pass), 0);
+			assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0,
+			       &frame, sizeof(frame), NULL, 0) == GFX_OK);
+			assert(gfx_stream_push(&stream, GFX_OP_PASS_BEGIN, 0,
+			       &pass, sizeof(pass), NULL, 0) == GFX_OK);
 		}
-		append(&stream, cases[i].opcode, zero, cases[i].size, 0);
+		assert(gfx_stream_push(&stream, cases[i].opcode, 0,
+		       zero, cases[i].size, NULL, 0) == GFX_OK);
 		if (cases[i].pass) {
-			append(&stream, GFX_OP_PASS_END, &end, sizeof(end), 0);
-			append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
+			assert(gfx_stream_push(&stream, GFX_OP_PASS_END, 0,
+			       &end, sizeof(end), NULL, 0) == GFX_OK);
+			assert(gfx_stream_push(&stream, GFX_OP_FRAME_END, 0,
+			       &frame, sizeof(frame), NULL, 0) == GFX_OK);
 		}
-		expect(stream.bytes, stream.size, GFX_OK, stream.size, UINT16_MAX);
+		expect(stream.bytes.buf, stream.bytes.offset, GFX_OK, stream.bytes.offset, UINT16_MAX);
 	}
 }
 
 static void test_payloads(void)
 {
-	test_stream_t         stream   = {0};
-	cmd_window_create_t   window   = {.title_len = 3};
-	cmd_buffer_upload_t   buffer   = {.data_size = 5};
-	cmd_texture_upload_t  texture  = {.data_size = 1};
-	cmd_shader_create_t   shader   = {.code_size = 4};
-	cmd_pipeline_create_t pipeline = {.attr_count = 2};
-	cmd_frame_t           frame    = {.window_id = 1};
-	cmd_pass_begin_t      pass     = {0};
-	cmd_bind_uniform_t    uniform  = {.data_size = 3};
-	gfx_cmd_header_t      end      = {0};
+	uint8_t               bytes[1024] = {0};
+	gfx_stream_t          stream      = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
+	uint8_t               payload[5]  = {0};
+	gfx_vertex_attr_t     attrs[2]    = {0};
+	cmd_window_create_t   window      = {.title_len = 3};
+	cmd_buffer_upload_t   buffer      = {.data_size = 5};
+	cmd_texture_upload_t  texture     = {.data_size = 1};
+	cmd_shader_create_t   shader      = {.code_size = 4};
+	cmd_pipeline_create_t pipeline    = {.attr_count = 2};
+	cmd_frame_t           frame       = {.window_id = 1};
+	cmd_pass_begin_t      pass        = {0};
+	cmd_bind_uniform_t    uniform     = {.data_size = 3};
+	gfx_cmd_header_t      end         = {0};
 	uint32_t              positions[6];
 
-	positions[0] = stream.size;
-	append(&stream, GFX_OP_WINDOW_CREATE, &window, sizeof(window), window.title_len);
-	positions[1] = stream.size;
-	append(&stream, GFX_OP_BUFFER_UPLOAD, &buffer, sizeof(buffer), buffer.data_size);
-	positions[2] = stream.size;
-	append(&stream, GFX_OP_TEXTURE_UPLOAD, &texture, sizeof(texture), texture.data_size);
-	positions[3] = stream.size;
-	append(&stream, GFX_OP_SHADER_CREATE, &shader, sizeof(shader), shader.code_size);
-	positions[4] = stream.size;
-	append(&stream, GFX_OP_PIPELINE_CREATE, &pipeline, sizeof(pipeline),
-	pipeline.attr_count * sizeof(gfx_vertex_attr_t));
-	append(&stream, GFX_OP_FRAME_BEGIN, &frame, sizeof(frame), 0);
-	append(&stream, GFX_OP_PASS_BEGIN, &pass, sizeof(pass), 0);
-	positions[5] = stream.size;
-	append(&stream, GFX_OP_BIND_UNIFORM, &uniform, sizeof(uniform), uniform.data_size);
-	append(&stream, GFX_OP_PASS_END, &end, sizeof(end), 0);
-	append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
-	expect(stream.bytes, stream.size, GFX_OK, stream.size, UINT16_MAX);
+	positions[0] = stream.bytes.offset;
+	assert(gfx_stream_push(&stream, GFX_OP_WINDOW_CREATE, 0, &window,
+	       sizeof(window), payload, window.title_len) == GFX_OK);
+	positions[1] = stream.bytes.offset;
+	assert(gfx_stream_push(&stream, GFX_OP_BUFFER_UPLOAD, 0, &buffer,
+	       sizeof(buffer), payload, buffer.data_size) == GFX_OK);
+	positions[2] = stream.bytes.offset;
+	assert(gfx_stream_push(&stream, GFX_OP_TEXTURE_UPLOAD, 0, &texture,
+	       sizeof(texture), payload, texture.data_size) == GFX_OK);
+	positions[3] = stream.bytes.offset;
+	assert(gfx_stream_push(&stream, GFX_OP_SHADER_CREATE, 0, &shader,
+	       sizeof(shader), payload, shader.code_size) == GFX_OK);
+	positions[4] = stream.bytes.offset;
+	assert(gfx_stream_push(&stream, GFX_OP_PIPELINE_CREATE, 0, &pipeline,
+	       sizeof(pipeline), attrs, pipeline.attr_count * sizeof(gfx_vertex_attr_t)) == GFX_OK);
+	assert(gfx_stream_push(&stream, GFX_OP_FRAME_BEGIN, 0,
+	       &frame, sizeof(frame), NULL, 0) == GFX_OK);
+	assert(gfx_stream_push(&stream, GFX_OP_PASS_BEGIN, 0,
+	       &pass, sizeof(pass), NULL, 0) == GFX_OK);
+	positions[5] = stream.bytes.offset;
+	assert(gfx_stream_push(&stream, GFX_OP_BIND_UNIFORM, 0,
+	       &uniform, sizeof(uniform), payload, uniform.data_size) == GFX_OK);
+	assert(gfx_stream_push(&stream, GFX_OP_PASS_END, 0,
+	       &end, sizeof(end), NULL, 0) == GFX_OK);
+	assert(gfx_stream_push(&stream, GFX_OP_FRAME_END, 0,
+	       &frame, sizeof(frame), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_OK, stream.bytes.offset, UINT16_MAX);
 
 	for (size_t i = 0; i < sizeof(positions) / sizeof(positions[0]); i++) {
 		gfx_cmd_header_t header;
 		uint32_t         pos = positions[i];
-		memcpy(&header, stream.bytes + pos, sizeof(header));
+		memcpy(&header, stream.bytes.buf + pos, sizeof(header));
 		uint16_t opcode = header.opcode;
 		header.byte_size -= 4;
-		memcpy(stream.bytes + pos, &header, sizeof(header));
-		expect(stream.bytes, stream.size, GFX_ERROR_INVALID_PAYLOAD_SIZE, pos, opcode);
+		memcpy(stream.bytes.buf + pos, &header, sizeof(header));
+		expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_PAYLOAD_SIZE, pos, opcode);
 		header.byte_size += 4;
-		memcpy(stream.bytes + pos, &header, sizeof(header));
+		memcpy(stream.bytes.buf + pos, &header, sizeof(header));
 	}
 	buffer.data_size = UINT32_MAX;
-	memcpy(stream.bytes + positions[1], &buffer, sizeof(buffer));
+	memcpy(stream.bytes.buf + positions[1], &buffer, sizeof(buffer));
 	gfx_cmd_header_t header = {GFX_OP_BUFFER_UPLOAD, 0, sizeof(buffer)};
-	memcpy(stream.bytes + positions[1], &header, sizeof(header));
-	expect(stream.bytes, stream.size, GFX_ERROR_INVALID_PAYLOAD_SIZE,
+	memcpy(stream.bytes.buf + positions[1], &header, sizeof(header));
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_PAYLOAD_SIZE,
 	positions[1], GFX_OP_BUFFER_UPLOAD);
 }
 
 static void test_order(void)
 {
-	test_stream_t       stream = {0};
-	cmd_frame_t         frame  = {.window_id = 1};
-	cmd_frame_t         other  = {.window_id = 2};
-	cmd_pass_begin_t    pass   = {0};
-	cmd_draw_t          draw   = {0};
-	cmd_buffer_create_t buffer = {0};
-	gfx_cmd_header_t    end    = {0};
+	uint8_t             bytes[1024] = {0};
+	gfx_stream_t        stream      = {.bytes = {.buf = bytes, .capacity = sizeof(bytes)}};
+	cmd_frame_t         frame       = {.window_id = 1};
+	cmd_frame_t         other       = {.window_id = 2};
+	cmd_pass_begin_t    pass        = {0};
+	cmd_draw_t          draw        = {0};
+	cmd_buffer_create_t buffer      = {0};
+	gfx_cmd_header_t    end         = {0};
 	uint32_t            pos;
 
-	append(&stream, GFX_OP_DRAW, &draw, sizeof(draw), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_DRAW);
-	stream.size = 0;
-	append(&stream, GFX_OP_PASS_END, &end, sizeof(end), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_PASS_END);
-	stream.size = 0;
-	append(&stream, GFX_OP_PASS_BEGIN, &pass, sizeof(pass), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_PASS_BEGIN);
-	stream.size = 0;
-	append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_FRAME_END);
-	stream.size = 0;
-	append(&stream, GFX_OP_FRAME_BEGIN, &frame, sizeof(frame), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INCOMPLETE_FRAME, stream.size, UINT16_MAX);
-	pos = stream.size;
-	append(&stream, GFX_OP_FRAME_BEGIN, &frame, sizeof(frame), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_FRAME_BEGIN);
-	stream.size = pos;
-	append(&stream, GFX_OP_FRAME_END, &other, sizeof(other), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_FRAME_WINDOW_MISMATCH, pos, GFX_OP_FRAME_END);
-	stream.size = pos;
-	append(&stream, GFX_OP_PASS_BEGIN, &pass, sizeof(pass), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INCOMPLETE_PASS, stream.size, UINT16_MAX);
-	pos = stream.size;
-	append(&stream, GFX_OP_PASS_BEGIN, &pass, sizeof(pass), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_PASS_BEGIN);
-	stream.size = pos;
-	append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_FRAME_END);
-	stream.size = pos;
-	append(&stream, GFX_OP_BUFFER_CREATE, &buffer, sizeof(buffer), 0);
-	expect(stream.bytes, stream.size, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_BUFFER_CREATE);
-	stream.size = pos;
-	append(&stream, GFX_OP_PASS_END, &end, sizeof(end), 0);
-	append(&stream, GFX_OP_FRAME_END, &frame, sizeof(frame), 0);
-	append(&stream, GFX_OP_FRAME_BEGIN, &other, sizeof(other), 0);
-	append(&stream, GFX_OP_FRAME_END, &other, sizeof(other), 0);
-	expect(stream.bytes, stream.size, GFX_OK, stream.size, UINT16_MAX);
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_DRAW, 0, &draw,
+	       sizeof(draw), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_DRAW);
+	stream.bytes.offset = 0;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_PASS_END, 0, &end,
+	       sizeof(end), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_PASS_END);
+	stream.bytes.offset = 0;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_PASS_BEGIN, 0, &pass,
+	       sizeof(pass), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_PASS_BEGIN);
+	stream.bytes.offset = 0;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_FRAME_END, 0, &frame,
+	       sizeof(frame), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_ORDER, 0, GFX_OP_FRAME_END);
+	stream.bytes.offset = 0;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_FRAME_BEGIN, 0, &frame,
+	       sizeof(frame), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INCOMPLETE_FRAME, stream.bytes.offset, UINT16_MAX);
+	pos = stream.bytes.offset;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_FRAME_BEGIN, 0, &frame,
+	       sizeof(frame), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_FRAME_BEGIN);
+	stream.bytes.offset = pos;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_FRAME_END, 0, &other,
+	       sizeof(other), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_FRAME_WINDOW_MISMATCH, pos, GFX_OP_FRAME_END);
+	stream.bytes.offset = pos;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_PASS_BEGIN, 0, &pass,
+	       sizeof(pass), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INCOMPLETE_PASS, stream.bytes.offset, UINT16_MAX);
+	pos = stream.bytes.offset;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_PASS_BEGIN, 0, &pass,
+	       sizeof(pass), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_PASS_BEGIN);
+	stream.bytes.offset = pos;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_FRAME_END, 0, &frame,
+	       sizeof(frame), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_FRAME_END);
+	stream.bytes.offset = pos;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_BUFFER_CREATE, 0, &buffer,
+	       sizeof(buffer), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_ERROR_INVALID_ORDER, pos, GFX_OP_BUFFER_CREATE);
+	stream.bytes.offset = pos;
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_PASS_END, 0, &end,
+	       sizeof(end), NULL, 0) == GFX_OK);
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_FRAME_END, 0, &frame,
+	       sizeof(frame), NULL, 0) == GFX_OK);
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_FRAME_BEGIN, 0, &other,
+	       sizeof(other), NULL, 0) == GFX_OK);
+	assert(gfx_stream_push_unsafe(&stream, GFX_OP_FRAME_END, 0, &other,
+	       sizeof(other), NULL, 0) == GFX_OK);
+	expect(stream.bytes.buf, stream.bytes.offset, GFX_OK, stream.bytes.offset, UINT16_MAX);
 }
 
 int main(void)
@@ -494,6 +523,7 @@ int main(void)
 	test_boundaries();
 	test_bytebuf_append();
 	test_stream_push();
+	test_stream_push_unsafe();
 	test_push_transitions();
 	test_push_failures_and_reset();
 	test_push_payload_sizes();
